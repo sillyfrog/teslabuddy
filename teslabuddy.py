@@ -180,8 +180,8 @@ class TeslaBuddy:
                 value = "P"
             self.pubifchanged(topic, value)
 
-        else:
-            print("TBC:", topic, value)
+        # else:
+        # print("TBC:", topic, value)
 
         if topic == "state":
             # Also update the charging/not charging switch
@@ -210,19 +210,15 @@ class TeslaBuddy:
         timeout = None
         while 1:
             try:
-                print("Waiting:", timeout)
                 topic, value = self.gpsq.get(block=True, timeout=timeout)
-                print("Got from queue", topic, value)
             except queue.Empty:
                 # New data has come in, with no updates, broadcast to HASS
-                print("Timedout!")
                 timeout = None
                 if (
                     current_state["latitude"] is None
                     or current_state["longitude"] is None
                 ):
                     # Don't try to send anyting if the lat/long is not set
-                    print("Not sending:", current_state)
                     continue
                 self.pubifchanged("gps", json.dumps(current_state))
                 continue
@@ -443,11 +439,6 @@ class TeslaBuddy:
             f"https://owner-api.teslamotors.com/api/1/vehicles/{self.eid}/command/{command}",
             json=payload,
             headers={"Authorization": f"Bearer {self.gettoken()}"},
-        )
-        print(
-            "Response:",
-            r.content,
-            f"Authorization: Bearer {self.gettoken()}",
         )
         response = r.json()["response"]
         if "error" in response:
