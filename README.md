@@ -2,6 +2,8 @@
 
 Connect a [TeslaMate](https://github.com/adriankumpf/teslamate) instance to [Home Assistant](https://www.home-assistant.io/), using MQTT. It allows basic control of your Tesla vehicle via Home Assistant (currently, just starting and stopping charging, and changing the charge limit). GPS/location information is also shown in Home Assistant.
 
+All devices are auto-discovered via Home Assistant using MQTT Auto-Discovery - no manual configuration is required.
+
 This is designed to be run in Docker (like TeslaMate), but can be run standalone if desired using command line arguments.
 
 ## Configuraiton
