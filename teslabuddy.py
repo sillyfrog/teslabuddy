@@ -36,6 +36,9 @@ COMMAND_RETRY_DELAY = 10
 # Number of seconds to cache the token from the TeslaMate DB
 TOKEN_CACHE_TIME = 30
 
+# Pub cache time in seconds
+PUBLISH_CACHE_TIME = 3600
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s: %(levelname)s:%(name)s: %(message)s"
 )
@@ -66,6 +69,7 @@ class TeslaBuddy:
         # other rather than an internal queue where all updates would eventually hit
         # the Tesla API, potentially resulting in ratelimits getting hit sooner.
         self._pubstate = {}
+        self._pubcacheexpiry = time.time() + PUBLISH_CACHE_TIME
 
         self._tokencache = {}
 
@@ -75,6 +79,11 @@ class TeslaBuddy:
         self.carmodeltxt: str | None = None
         self.error_sleep_time = COMMAND_RETRY_DELAY
         self.teslamatesettings = None
+
+        if self.config.wake_topics:
+            self.wake_topics = set(self.config.wake_topics.split())
+        else:
+            self.wake_topics = set()
 
         self.basetopic = ""
 
@@ -147,6 +156,8 @@ class TeslaBuddy:
     def onmqttconnect(self, client, userdata, flags, rc):
         self.client.subscribe(f"{self.basetopic}/+/set")
         self.client.subscribe(f"teslamate/cars/{self.tmid}/+")
+        for topic in self.wake_topics:
+            self.client.subscribe(topic)
 
     def onmqttmessage(self, client, userdata, msg):
         payload = msg.payload.decode()
@@ -154,7 +165,9 @@ class TeslaBuddy:
         parts = topic.split("/")
 
         log.debug("Incomming MQTT Message: %s : %s", topic, payload)
-        if topic.startswith("teslamate/cars/"):
+        if topic in self.wake_topics:
+            self.waketeslamate()
+        elif topic.startswith("teslamate/cars/"):
             self.teslamatemsg(parts[3], payload)
         elif topic.startswith(self.basetopic):
             if parts[-1] == "set":
@@ -330,6 +343,14 @@ class TeslaBuddy:
         )
 
         parser.add_argument(
+            "--wake-topics",
+            help="a space separated list of MQTT topics to subscribe to and use to "
+            "wake up TeslaMate. If any of the topics are called with any value, "
+            "the TeslaMate API will be called to cancel sleep. "
+            "Used for example when the garage door is opened",
+        )
+
+        parser.add_argument(
             "--debug",
             help='if set to "true", will include debug level logging',
         )
@@ -458,7 +479,14 @@ class TeslaBuddy:
         """Publish to MQTT item (self.basetopic will be applied), with value.
 
         An item is only published if it has changed from when previously published.
+
+        Cache is cleared about every hour.
         """
+        if time.time() > self._pubcacheexpiry:
+            log.debug("Clearing publish cache")
+            self._pubstate.clear()
+            self._pubcacheexpiry = time.time() + PUBLISH_CACHE_TIME
+
         if self._pubstate.get(item) != value:
             self.client.publish(f"{self.basetopic}/{item}", value)
             self._pubstate[item] = value
