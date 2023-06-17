@@ -20,7 +20,6 @@ import argparse
 import queue
 import time
 import json
-import math
 import logging
 import threading
 import postgres
@@ -51,9 +50,12 @@ MAP_THROUGH_TOPICS = {
     "charger_actual_current",
     "charger_power",
     "charger_voltage",
+    "est_battery_range_km",
+    "ideal_battery_range_km",
     "inside_temp",
     "odometer",
     "outside_temp",
+    "rated_battery_range_km",
     "state",
     "time_to_full_charge",
 }
@@ -114,6 +116,8 @@ class TeslaBuddy:
         self.vin = cardata[1]
         self.eid = cardata[2]
         self.carname = cardata[3]
+        if self.carname is None:
+            raise ValueError("Car name is not set in TeslaMate!")
         self.carmodeltxt = f"Model {cardata[5]} {cardata[4]}"
 
         self.teslamatesettings = self.getdbconn().one("SELECT * FROM settings LIMIT 1;")
@@ -136,7 +140,7 @@ class TeslaBuddy:
         self.client.connect(self.config.mqtt_host)
         self.client.loop_start()
 
-        # Thread to moanage bundling GPS information into a single message
+        # Thread to manage bundling GPS information into a single message
         threading.Thread(target=self.gpsbundlethread, daemon=True).start()
         # Thread to manage waking TeslaMate when incoming commands happen
         threading.Thread(target=self.waketeslamatethread, daemon=True).start()
@@ -172,6 +176,10 @@ class TeslaBuddy:
         elif topic.startswith(self.basetopic):
             if parts[-1] == "set":
                 self.teslapiq.put((parts[-2], payload))
+
+    def mqtt_publish(self, topic, payload, retain=False):
+        log.debug("Publishing MQTT Message: %s : %s", topic, payload)
+        self.client.publish(topic, payload, retain=retain)
 
     def teslamatemsg(self, topic, value):
         "Process as message from TeslaMate"
@@ -488,7 +496,7 @@ class TeslaBuddy:
             self._pubcacheexpiry = time.time() + PUBLISH_CACHE_TIME
 
         if self._pubstate.get(item) != value:
-            self.client.publish(f"{self.basetopic}/{item}", value)
+            self.mqtt_publish(f"{self.basetopic}/{item}", value)
             self._pubstate[item] = value
 
     def homeassistantsetup(self):
@@ -594,7 +602,7 @@ class TeslaBuddy:
         ]
 
         # Special case to handle the device element
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/sensor/{self.vin}/battery/config",
             json.dumps(
                 {
@@ -628,14 +636,14 @@ class TeslaBuddy:
             if icon:
                 data["icon"] = icon
 
-            self.client.publish(
+            self.mqtt_publish(
                 f"homeassistant/{hasstype}/{self.vin}/{topic}/config",
                 json.dumps(data),
                 retain=True,
             )
 
         # Charge limit, including setting
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/number/{self.vin}/charge_limit_soc/config",
             json.dumps(
                 {
@@ -653,7 +661,7 @@ class TeslaBuddy:
         )
 
         # Charging action, including setting/turning on/off
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/switch/{self.vin}/charging/config",
             json.dumps(
                 {
@@ -668,7 +676,7 @@ class TeslaBuddy:
             retain=True,
         )
 
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/device_tracker/{self.vin}/gps/config",
             json.dumps(
                 {
